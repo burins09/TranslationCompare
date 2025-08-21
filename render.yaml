@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: translation-compare
+    runtime: static
+    staticPublishPath: .
+    # buildCommand: ""   # no build step needed for pure HTML
+    envVars:
+      - key: SKIP_INSTALL_DEPS
+        value: "true"
+    headers:
+      - path: /index.html
+        name: Cache-Control
+        value: "no-store"
+    previews:
+      generation: automatic

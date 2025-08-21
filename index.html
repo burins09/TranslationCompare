@@ -1,0 +1,527 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Translation Compare – Category-aware + Pending + Delegation</title>
+<style>
+  :root{
+    --bg:#0f1116;--panel:#151925;--muted:#aab2c0;--text:#e8ecf1;
+    --accent:#43b581;--warn:#ffb020;--danger:#ff6b6b;--info:#5aa9ff;
+    --badge:#232a3b;--border:#202636;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Inter,Arial}
+  header{display:flex;gap:12px;align-items:center;padding:14px 18px;background:var(--panel);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:5}
+  h1{font-size:16px;margin:0 8px 0 0;opacity:.9}
+  .container{display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:16px}
+  .panel{background:var(--panel);border:1px solid var(--border);border-radius:14px;overflow:hidden;display:flex;flex-direction:column;min-height:60vh}
+  .panel header{position:unset;background:transparent;border:0;padding:12px}
+  .controls{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  select, input[type="text"]{
+    background:#0e1320;border:1px solid var(--border);color:var(--text);
+    padding:8px 10px;border-radius:10px;outline:none;min-width:180px;
+  }
+  .btn{background:#1d2333;border:1px solid var(--border);color:var(--text);padding:8px 10px;border-radius:10px;cursor:pointer}
+  .btn:hover{filter:brightness(1.1)}
+  .btn.primary{background:var(--accent);border-color:#2d9c6c;color:#0a1118}
+  .btn.warn{background:var(--warn);border-color:#c88d1e;color:#0a1118}
+  .btn.danger{background:var(--danger);border-color:#e25555;color:#0a1118}
+  .btn.ghost{background:transparent;border-color:var(--border)}
+  .btn[disabled]{opacity:.5;cursor:not-allowed}
+  .row-actions{display:flex;gap:6px;flex-wrap:wrap}
+  table{width:100%;border-collapse:separate;border-spacing:0 8px}
+  thead th{font-weight:600;color:var(--muted);padding:8px 10px;text-align:left}
+  tbody td{background:#0e1320;border:1px solid var(--border);border-left:0;border-right:0;padding:8px 10px;vertical-align:top}
+  tbody tr td:first-child{border-left:1px solid var(--border);border-radius:10px 0 0 10px}
+  tbody tr td:last-child{border-right:1px solid var(--border);border-radius:0 10px 10px 0}
+  .k{font-family:ui-monospace, Menlo, Consolas, monospace; font-size:12px}
+  .value-input{width:100%;background:#0b0f1b;color:var(--text);border:1px solid #283047;border-radius:8px;padding:6px 8px}
+  .value-input[readonly]{opacity:.7;border-style:dashed;cursor:not-allowed}
+  .legend{display:flex;gap:8px;flex-wrap:wrap}
+  .badge{background:#232a3b;border:1px solid var(--border);color:var(--muted);padding:3px 8px;border-radius:999px;font-size:12px;white-space:nowrap}
+  .status.same{color:#87d37c;background:#143018;border-color:#215c2a}
+  .status.diff{color:#ffd18b;background:#31220e;border-color:#5b3d14}
+  .status.missing-left,.status.missing-right{color:#ff9ea3;background:#341218;border-color:#5e222c}
+  .pending{background:#1e2435;border-color:#3a4669;color:#9fb2ff}
+  .pending.copied-new{background:#143018;border-color:#215c2a;color:#9ce29c}
+  .pending.copied-overwrite{background:#31220e;border-color:#6b4c1a;color:#ffd18b}
+  .pending.edited{background:#1e2031;border-color:#3b3e71;color:#b9c2ff}
+  .invalid{background:#2b1a1a;border-color:#5b2a2a;color:#ffb3b3}
+  .row-hl{box-shadow:0 0 0 9999px rgba(67,181,129,0.06) inset}
+  .row-hl2{box-shadow:0 0 0 9999px rgba(255,176,32,0.06) inset}
+  .footer-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;padding:12px;border-top:1px solid var(--border);background:#111522}
+  .hint{color:var(--muted);font-size:12px}
+  .top-right{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .count-dot{display:inline-flex;align-items:center;gap:6px}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--warn);display:inline-block}
+  .toast{position:fixed;right:16px;bottom:16px;background:#0e1320;border:1px solid var(--border);padding:10px 12px;border-radius:10px;opacity:0;transform:translateY(8px);transition:.25s}
+  .toast.show{opacity:1;transform:translateY(0)}
+</style>
+</head>
+<body>
+<header>
+  <h1>Translation Compare</h1>
+  <div class="legend">
+    <span class="badge status same">same</span>
+    <span class="badge status diff">different-value</span>
+    <span class="badge status missing-left">missing-left</span>
+    <span class="badge status missing-right">missing-right</span>
+    <span class="badge pending">pending</span>
+    <span class="badge pending copied-new">copied-new</span>
+    <span class="badge pending copied-overwrite">copied-overwrite</span>
+    <span class="badge pending edited">edited</span>
+    <span class="badge invalid">invalid-key</span>
+  </div>
+  <div class="top-right">
+    <span id="pendingCount" class="count-dot" title="รายการที่ยังไม่เซฟ"><span class="dot"></span><span id="pendingNum">0</span> pending</span>
+    <button type="button" class="btn ghost" id="resetBtn">Reset</button>
+    <button type="button" class="btn primary" id="saveAllBtn" disabled>Save All</button>
+    <button type="button" class="btn" id="exportBtn">Export JSON (Target)</button>
+  </div>
+</header>
+
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:0 16px 8px">
+  <div class="hint">Main (ซ้าย) • อ่านอย่างเดียว • ใช้ copy ไปขวา</div>
+  <div class="hint" style="text-align:right">Target (ขวา) • แก้ไข/บันทึก • คิด “คีย์” ด้วย (category + key)</div>
+</div>
+
+<div class="container">
+  <!-- LEFT: MAIN / READONLY -->
+  <section class="panel" id="leftPanel">
+    <header>
+      <div class="controls">
+        <select id="leftDb"></select>
+        <input id="leftSearch" type="text" placeholder="Search (left) key/value/category"/>
+        <select id="statusFilterLeft">
+          <option value="all">All statuses</option>
+          <option value="same">same</option>
+          <option value="different-value">different-value</option>
+          <option value="missing-left">missing-left</option>
+          <option value="missing-right">missing-right</option>
+        </select>
+        <button type="button" class="btn" id="copySelectedLtoR" title="คัดลอกค่าจาก Main → Target (ทับได้)">Apply Left → Right (selected)</button>
+        <button type="button" class="btn warn" id="copySelectedMissingLtoR" title="คัดลอกเฉพาะคีย์ที่ Target ไม่มี (ตามที่เลือก)">Copy Selected Missing → Right</button>
+        <button type="button" class="btn ghost" id="copyMissingLtoR" title="คัดลอกเฉพาะคีย์ที่ Target ไม่มี (ทั้งหมด)">Copy All Missing → Right</button>
+      </div>
+    </header>
+    <div style="padding:0 12px 12px;overflow:auto">
+      <table id="leftTable">
+        <thead>
+          <tr>
+            <th><input type="checkbox" id="checkAllLeft"/></th>
+            <th>Category</th>
+            <th>Key</th>
+            <th>Value (readonly)</th>
+            <th>Status</th>
+            <th>Row Actions</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div class="footer-actions">
+      <span class="hint">คีย์ถูกจำแนกด้วย <b>category + key</b> • ถ้าคนละ category ถือว่าคนละรายการ</span>
+    </div>
+  </section>
+
+  <!-- RIGHT: TARGET / EDITABLE -->
+  <section class="panel" id="rightPanel">
+    <header>
+      <div class="controls">
+        <select id="rightDb"></select>
+        <input id="rightSearch" type="text" placeholder="Search (right) key/value/category"/>
+        <select id="statusFilterRight">
+          <option value="all">All statuses</option>
+          <option value="same">same</option>
+          <option value="different-value">different-value</option>
+          <option value="missing-left">missing-left</option>
+          <option value="missing-right">missing-right</option>
+        </select>
+      </div>
+    </header>
+    <div style="padding:0 12px 12px;overflow:auto">
+      <table id="rightTable">
+        <thead>
+          <tr>
+            <th></th>
+            <th>Category</th>
+            <th>Key</th>
+            <th>Value (editable)</th>
+            <th>Status</th>
+            <th>Pending</th>
+            <th>Row Actions</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div class="footer-actions">
+      <span class="hint">Save รายแถวหรือ Save All เพื่อบันทึกลง Target จริง</span>
+    </div>
+  </section>
+</div>
+
+<div id="toast" class="toast">Saved</div>
+
+<script>
+/** ---------- Mock RAW (key → {value, category}) ---------- **/
+const RAW = {
+  "RC-PROD": {
+    welcome_back: { value:"Velkommen tilbage", category:"label" },
+    right_now: { value:"Lige nu", category:"label" },
+    bonus_balance: { value:"Bonus saldo", category:"label" },
+    play_free: { value:"Spil for sjov", category:"label" },
+    noMoreHistory: { value:"- Der kunne ikke hentes flere transaktioner -", category:"label" },
+    confirm_reject: { value:"Du kan ikke udbetale i øjeblikket.", category:"limitations" },
+    profile_title: { value:"Min profil", category:"menu" },
+    deposit: { value:"Indbetal", category:"button" },
+    title: { value:"Titel", category:"page" },
+    "bad key": { value:"X", category:"label" },
+  },
+  "RC-DEV": {
+    welcome_back: { value:"Velkommen Tilbage", category:"label" },
+    right_now: { value:"Lige Nu", category:"label" },
+    bonus_balance: { value:"Bonus Saldo", category:"label" },
+    play_free: { value:"Spil for rigtige sjov", category:"label" },
+    noMoreHistory: { value:"- Ingen flere transaktioner at vise -", category:"label" },
+    profile_title: { value:"Min profil", category:"menu" },
+    cashout: { value:"Udbetal", category:"button" },
+    title: { value:"Titel (DEV)", category:"header" },
+  },
+  "VC-DEV": {
+    welcome_back: { value:"Velkommen", category:"label" },
+    right_now: { value:"Nu", category:"label" },
+    bonus_balance: { value:"Bonus", category:"label" },
+    play_free: { value:"Spil gratis", category:"label" },
+    vip_label: { value:"VIP", category:"badge" },
+  },
+  "KC-DEV": {
+    welcome_back: { value:"Hej igen", category:"label" },
+    right_now: { value:"Lige nu", category:"label" },
+    deposit: { value:"Indbetaling", category:"button" },
+    confirm_reject: { value:"Udbetaling ikke mulig nu.", category:"limitations" },
+  },
+  "RC-HPROD": {
+    welcome_back: { value:"Velkommen tilbage", category:"label" },
+    deposit: { value:"Indbetal", category:"button" },
+    promo_banner: { value:"Nyheder og tilbud", category:"label" },
+  },
+  "VC-HPROD": {
+    welcome_back: { value:"Velkommen Tilbage", category:"label" },
+    play_free: { value:"Spil gratis", category:"label" },
+    profile_title: { value:"Min profil", category:"menu" },
+  }
+};
+
+/** ---------- Normalize to composite: "category::key" ---------- **/
+function toCompositeMap(obj){
+  const out = {};
+  for(const k of Object.keys(obj)){
+    const cat = obj[k]?.category ?? "uncategorized";
+    const cid = `${cat}::${k}`;
+    out[cid] = { key:k, category:cat, value: obj[k]?.value ?? "" };
+  }
+  return out;
+}
+const DB = {};
+for(const name of Object.keys(RAW)){ DB[name] = toCompositeMap(RAW[name]); }
+
+/** ---------- State ---------- **/
+const DB_NAMES = Object.keys(DB);
+let leftName = DB_NAMES[0];
+let rightName = DB_NAMES[1];
+let leftSearch = "", rightSearch = "";
+let statusFilterLeft = "all", statusFilterRight = "all";
+
+/* Pending per-right DB:
+   CHANGES[rightName][cid] = { key, category, value, type }
+*/
+const CHANGES = {};
+const getChanges = () => (CHANGES[rightName] ||= {});
+
+const $ = (s, r=document)=>r.querySelector(s);
+const $$ = (s, r=document)=>Array.from(r.querySelectorAll(s));
+
+/** ---------- Helpers ---------- **/
+const escapeHtml = s => String(s??'').replace(/[&<>"']/g, m=>({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[m]));
+const badge = (text, cls='') => `<span class="badge ${cls}">${text}</span>`;
+const clsStatus = s => s==="same"?"same":(s==="different-value"?"diff":s);
+const unionCIDs = (a,b)=> Array.from(new Set([...Object.keys(a), ...Object.keys(b)])).sort();
+
+function getStatus(cid, LDB, RVIEW){
+  const L = LDB[cid], R = RVIEW[cid];
+  if(L && R) return (L.value === R.value) ? "same" : "different-value";
+  if(L && !R) return "missing-right";
+  if(!L && R) return "missing-left";
+  return "unknown";
+}
+
+/* Key validation rules */
+function keyHasProblems(cid){
+  const [category, key] = cid.split("::");
+  if(!category || !key) return true;
+  if(key.length>120) return true;
+  if(!/^[A-Za-z0-9_.-]+$/.test(key)) return true;
+  return false;
+}
+
+function matchesFilter({cid, item, status, q, statusFilter}){
+  const [cat, key] = cid.split("::");
+  const hay = (key + " " + cat + " " + (item?.value||"")).toLowerCase();
+  const okText = !q || hay.includes(q.toLowerCase());
+  const okStatus = (statusFilter==="all") || (status===statusFilter);
+  return okText && okStatus;
+}
+function toast(msg){
+  const t = document.getElementById("toast");
+  t.textContent = msg || "Saved";
+  t.classList.add("show");
+  setTimeout(()=>t.classList.remove("show"), 1200);
+}
+
+/** ---------- Render ---------- **/
+function render(){
+  $("#leftDb").innerHTML = DB_NAMES.map(n=>`<option ${n===leftName?'selected':''}>${n}</option>`).join("");
+  $("#rightDb").innerHTML = DB_NAMES.map(n=>`<option ${n===rightName?'selected':''}>${n}</option>`).join("");
+
+  const LDB = DB[leftName];
+  const RBASE = DB[rightName];
+
+  // RVIEW = RBASE + CHANGES overlay
+  const RVIEW = JSON.parse(JSON.stringify(RBASE));
+  const PEND = getChanges();
+  for(const cid in PEND){
+    RVIEW[cid] = { key: PEND[cid].key, category: PEND[cid].category, value: PEND[cid].value };
+  }
+
+  const cids = unionCIDs(LDB, RVIEW);
+  const leftRows=[], rightRows=[];
+  for(const cid of cids){
+    const st = getStatus(cid, LDB, RVIEW);
+    if(matchesFilter({cid,item:LDB[cid],status:st,q:leftSearch,statusFilter:statusFilterLeft}))
+      leftRows.push(rowLeftHTML(cid, LDB[cid], st));
+    if(matchesFilter({cid,item:RVIEW[cid],status:st,q:rightSearch,statusFilter:statusFilterRight}))
+      rightRows.push(rowRightHTML(cid, RVIEW[cid], st, PEND[cid]));
+  }
+  $("#leftTable tbody").innerHTML = leftRows.join("") || noRow(6);
+  $("#rightTable tbody").innerHTML = rightRows.join("") || noRow(7);
+
+  const pCount = Object.keys(PEND).length;
+  $("#pendingNum").textContent = pCount;
+  $("#saveAllBtn").disabled = pCount===0;
+
+  wirePerRenderEvents();
+}
+
+function noRow(col){ return `<tr><td colspan="${col}" style="text-align:center;opacity:.6">No data found.</td></tr>`; }
+
+function rowLeftHTML(cid, obj, status){
+  const [cat, key] = cid.split("::");
+  const val = obj?.value ?? "";
+  const invalid = keyHasProblems(cid);
+
+  let actHTML = "";
+  if(invalid){
+    actHTML = badge("invalid-key","invalid");
+  }else if(status==="missing-right"){
+    actHTML = `<button type="button" class="btn warn" data-act="copyKeyToRight">+Key → R</button>`;
+  }else if(status==="different-value"){
+    actHTML = `<button type="button" class="btn" data-act="copyLtoR">L→R</button>`;
+  }
+
+  return `
+    <tr data-side="left" data-cid="\${cid}">
+      <td><input type="checkbox" class="rowCheck" \${invalid?'disabled':''}/></td>
+      <td>\${cat}</td>
+      <td class="k">\${key}</td>
+      <td><input class="value-input" readonly value="\${escapeHtml(val)}" /></td>
+      <td>
+        \${badge(status, \`status \${clsStatus(status)}\`)}
+        \${invalid ? ' ' + badge('invalid-key','invalid') : ''}
+      </td>
+      <td><div class="row-actions">\${actHTML}</div></td>
+    </tr>
+  `;
+}
+
+function rowRightHTML(cid, obj, status, pendingInfo){
+  const [cat, key] = cid.split("::");
+  const val = obj?.value ?? "";
+  const hasPending = !!pendingInfo;
+  const pBadge = hasPending ? badge(pendingInfo.type, `pending \${pendingInfo.type}`) : '';
+  const rowHL = hasPending
+      ? (pendingInfo.type==="copied-overwrite" ? 'row-hl2' : 'row-hl')
+      : '';
+  const saveBtn = hasPending ? `<button type="button" class="btn primary" data-act="saveOne">Save</button>` : '';
+  const discardBtn = hasPending ? `<button type="button" class="btn ghost" data-act="discardOne">Discard</button>` : '';
+  return `
+    <tr class="\${rowHL}" data-side="right" data-cid="\${cid}">
+      <td></td>
+      <td>\${cat}</td>
+      <td class="k">\${key}</td>
+      <td><input class="value-input" value="\${escapeHtml(val)}" /></td>
+      <td>\${badge(status, \`status \${clsStatus(status)}\`)}</td>
+      <td>\${pBadge}</td>
+      <td><div class="row-actions">\${saveBtn}\${discardBtn}</div></td>
+    </tr>
+  `;
+}
+
+/** ---------- Events ---------- **/
+function wirePerRenderEvents(){
+  // checkbox select-all
+  $("#checkAllLeft").checked = false;
+  $("#checkAllLeft").addEventListener("change", e=>{
+    $$("#leftTable .rowCheck").forEach(cb=>{ if(!cb.disabled) cb.checked = e.target.checked; });
+  });
+
+  // RIGHT edits -> pending: edited
+  $$("#rightTable tbody tr").forEach(tr=>{
+    const input = $(".value-input", tr);
+    if(!input) return;
+    input.addEventListener("change", ()=>{
+      const cid = tr.dataset.cid;
+      stageEdit(cid, input.value);
+    });
+  });
+
+  // RIGHT save/discard one
+  $$(`#rightTable [data-act="saveOne"]`).forEach(btn=>{
+    btn.addEventListener("click", ()=>{
+      const cid = btn.closest("tr").dataset.cid;
+      saveOne(cid);
+    });
+  });
+  $$(`#rightTable [data-act="discardOne"]`).forEach(btn=>{
+    btn.addEventListener("click", ()=>{
+      const cid = btn.closest("tr").dataset.cid;
+      discardOne(cid);
+    });
+  });
+}
+
+// LEFT per-key actions via delegation (bind once)
+(function bindLeftDelegationOnce(){
+  const leftTable = document.getElementById('leftTable');
+  if (leftTable._delegateBound) return;
+  leftTable.addEventListener('click', (e)=>{
+    const btn = e.target.closest('[data-act="copyLtoR"], [data-act="copyKeyToRight"]');
+    if (!btn) return;
+    const tr = btn.closest('tr');
+    const cid = tr?.dataset?.cid;
+    if (!cid || keyHasProblems(cid)) return; // prevent invalid
+    const forceOverwrite = btn.dataset.act === 'copyLtoR';
+    createPendingFromLeft([cid], { forceOverwrite });
+  });
+  leftTable._delegateBound = true;
+})();
+
+// Top controls (bind once)
+(function bindTopControlsOnce(){
+  if (window._topBound) return;
+  window._topBound = true;
+
+  document.getElementById("leftDb").onchange = e=>{ leftName = e.target.value; render(); };
+  document.getElementById("rightDb").onchange = e=>{ rightName = e.target.value; render(); };
+  document.getElementById("leftSearch").oninput = e=>{ leftSearch = e.target.value; render(); };
+  document.getElementById("rightSearch").oninput = e=>{ rightSearch = e.target.value; render(); };
+  document.getElementById("statusFilterLeft").onchange = e=>{ statusFilterLeft = e.target.value; render(); };
+  document.getElementById("statusFilterRight").onchange = e=>{ statusFilterRight = e.target.value; render(); };
+
+  document.getElementById("copySelectedLtoR").onclick = ()=>{
+    const cids = selectedLeftCIDs().filter(cid => !keyHasProblems(cid));
+    if(cids.length) createPendingFromLeft(cids, {forceOverwrite:true});
+  };
+  document.getElementById("copySelectedMissingLtoR").onclick = ()=>{
+    const cids = selectedLeftCIDs().filter(cid => !DB[rightName][cid] && !keyHasProblems(cid));
+    if(cids.length) createPendingFromLeft(cids);
+  };
+  document.getElementById("copyMissingLtoR").onclick = ()=>{
+    const cids = Object.keys(DB[leftName]).filter(cid => !DB[rightName][cid] && !keyHasProblems(cid));
+    if(cids.length) createPendingFromLeft(cids);
+  };
+
+  document.getElementById("saveAllBtn").onclick = saveAll;
+  document.getElementById("exportBtn").onclick = exportRight;
+  document.getElementById("resetBtn").onclick = ()=> location.reload();
+})();
+
+function selectedLeftCIDs(){
+  return $$(`#leftTable tbody tr`).filter(tr => $(".rowCheck", tr)?.checked).map(tr=>tr.dataset.cid);
+}
+
+/** ---------- Pending logic ---------- **/
+function createPendingFromLeft(cids, {forceOverwrite=false}={}){
+  const LDB = DB[leftName];
+  const RSAVED = DB[rightName];
+  const PEND = getChanges();
+  cids.forEach(cid=>{
+    const L = LDB[cid];
+    if(!L) return;
+    const type = RSAVED[cid] ? "copied-overwrite" : "copied-new";
+    if(!forceOverwrite && type==="copied-overwrite") return;
+    PEND[cid] = { key:L.key, category:L.category, value:L.value, type };
+  });
+  render();
+}
+
+function stageEdit(cid, value){
+  const RSAVED = DB[rightName];
+  const PEND = getChanges();
+  const meta = RSAVED[cid] || PEND[cid] || parseCID(cid);
+  PEND[cid] = { key: meta.key, category: meta.category, value, type:"edited" };
+  render();
+}
+
+function parseCID(cid){
+  const [category, key] = cid.split("::");
+  return { category, key };
+}
+
+/** ---------- Save / Discard ---------- **/
+function saveOne(cid){
+  const PEND = getChanges();
+  if(!PEND[cid]) return;
+  DB[rightName][cid] = { key:PEND[cid].key, category:PEND[cid].category, value:PEND[cid].value };
+  delete PEND[cid];
+  render();
+  toast(\`Saved \${cid}\`);
+}
+function discardOne(cid){
+  const PEND = getChanges();
+  if(!PEND[cid]) return;
+  delete PEND[cid];
+  render();
+  toast(\`Discarded \${cid}\`);
+}
+function saveAll(){
+  const PEND = getChanges();
+  const ids = Object.keys(PEND);
+  ids.forEach(cid=>{
+    DB[rightName][cid] = { key:PEND[cid].key, category:PEND[cid].category, value:PEND[cid].value };
+    delete PEND[cid];
+  });
+  render();
+  toast(\`Saved \${ids.length} item(s)\`);
+}
+
+/** ---------- Export (Target saved only) ----------
+  รูปแบบ: Array<{category, key, value}>
+--------------------------------*/
+function exportRight(){
+  const items = Object.values(DB[rightName]).map(x=>({category:x.category, key:x.key, value:x.value}));
+  const out = JSON.stringify(items, null, 2);
+  const blob = new Blob([out], {type:"application/json"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = \`\${rightName}.json\`;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
+
+/** ---------- Init ---------- **/
+render();
+</script>
+</body>
+</html>
